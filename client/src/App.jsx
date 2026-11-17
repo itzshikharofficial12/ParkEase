@@ -3,6 +3,7 @@ import { Routes, Route, useParams } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import useAuth from "./hooks/useAuth.js";
+import InventoryPage from "./pages/InventoryPage.jsx";
 import AccountDashboard from "./pages/AccountDashboard.jsx";
 import { ROLES } from "./constants/roles.js";
 import PublicLayout from "./layouts/PublicLayout.jsx";
@@ -58,6 +59,12 @@ export default function App() {
           }
         >
           <Route path="/dashboard" element={<RoleDashboard />} />
+          <Route path="/dashboard/bookings" element={
+            <ProtectedRoute allowedRoles={[ROLES.USER]}>
+              <DashboardPage bookingsOnly />
+            </ProtectedRoute>
+          } />
+          <Route path="/dashboard/malls/:id/inventory" element={<MallPage Component={InventoryPage} />} />
         </Route>
       </Routes>
     </AuthProvider>

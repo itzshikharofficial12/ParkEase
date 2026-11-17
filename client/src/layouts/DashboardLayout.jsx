@@ -30,6 +30,9 @@ export default function DashboardLayout({ children }) {
     );
   }
   links.push({ label: user?.role === "ADMIN" ? "Public directory" : "Find parking", icon: "pin", to: "/malls", active: location.pathname.startsWith("/malls") });
+  if (user?.role === "USER") {
+    links.push({ label: "My bookings", icon: "clipboard", to: "/dashboard/bookings", active: location.pathname === "/dashboard/bookings" });
+  }
   const currentLabel = links.find((link) => link.active)?.label || "Overview";
 
   useEffect(() => {
