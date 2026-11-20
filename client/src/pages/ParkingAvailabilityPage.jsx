@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import FloorRows from "../components/FloorRows.jsx";
 import Button from "../components/Button.jsx";
@@ -41,6 +41,7 @@ export default function ParkingAvailabilityPage({ initialMall = null, initialDat
   const [bookingError, setBookingError] = useState("");
   const [bookingBusy, setBookingBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const bookingAttempt = useRef(null);
   useEffect(() => {
     if (initialData && revision === 0) return;
     const controller = new AbortController();
@@ -91,7 +92,13 @@ export default function ParkingAvailabilityPage({ initialMall = null, initialDat
     setBookingBusy(true);
     setBookingError("");
     try {
-      const confirmed = await createBooking({ ...window, mallId, bayId: selected.id, vehicleNumber: plate });
+      const payload = { ...window, mallId, bayId: selected.id, vehicleNumber: plate };
+      const fingerprint = JSON.stringify([auth?.user?._id, payload]);
+      if (bookingAttempt.current?.fingerprint !== fingerprint) {
+        bookingAttempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      const confirmed = await createBooking(payload, bookingAttempt.current.key);
+      bookingAttempt.current = null;
       setBooking(confirmed);
       setSelectedId(null);
       setDetailsOpen(false);

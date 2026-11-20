@@ -66,6 +66,7 @@ test("backend reservation and gate scenario on isolated replica set", { skip }, 
   assert.equal(provision.status, 201, JSON.stringify(provision.body));
   assert.equal(provision.body.data.guard.passwordHash, undefined);
   const guard = await User.findById(provision.body.data.guard._id);
+  const oldGuardToken = signAccessToken(guard);
   const beforeChange = await api("/qr/verify", guard, "POST", { mallId: mall.id, token: "a".repeat(64), action: "ENTRY" });
   assert.equal(beforeChange.status, 403);
   const changed = await api("/users/password", guard, "PATCH", {
@@ -73,6 +74,9 @@ test("backend reservation and gate scenario on isolated replica set", { skip }, 
   assert.equal(changed.status, 200, JSON.stringify(changed.body));
   const activeGuard = await User.findById(guard._id);
   assert.equal(activeGuard.mustChangePassword, false);
+  assert.equal((await api("/users/profile", null, "GET", undefined,
+    { Authorization: `Bearer ${oldGuardToken}` })).status, 401, "Password change invalidates already-issued access tokens");
+  assert.equal((await api("/users/profile", activeGuard)).status, 200);
   assert.equal((await api(`/malls/${mall.id}/guard-assignments`, wrongOwner, "POST", { guardId: guard.id })).status, 404);
   const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   const future = { mallId: mall.id, bayId, vehicleNumber: "DL01AB1234", vehicleType: "CAR",
