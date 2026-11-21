@@ -46,14 +46,27 @@ export default function ParkingAvailabilityPage({ initialMall = null, initialDat
     if (initialData && revision === 0) return;
     const controller = new AbortController();
     const params = window ? { startTime: window.startTime, endTime: window.endTime } : {};
-    Promise.all([
-      initialMall ? Promise.resolve({ mall: initialMall }) : getMallById(mallId, { signal: controller.signal }),
-      getParkingAvailability(mallId, params, { signal: controller.signal }),
-    ])
-      .then(([mallResult, parkingResult]) => { if (!controller.signal.aborted) { setMall(mallResult.mall); setData(parkingResult); } })
-      .catch((err) => { if (!controller.signal.aborted) setError(err.message); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    let timer;
+    let reading = false;
+    async function read() {
+      if (reading || controller.signal.aborted) return;
+      reading = true;
+      clearTimeout(timer);
+      try {
+        const [mallResult, parkingResult] = await Promise.all([
+          initialMall ? Promise.resolve({ mall: initialMall }) : getMallById(mallId, { signal: controller.signal }),
+          getParkingAvailability(mallId, params, { signal: controller.signal }),
+        ]);
+        if (!controller.signal.aborted) { setMall(mallResult.mall); setData(parkingResult); setError(""); }
+      } catch (err) { if (!controller.signal.aborted) setError(err.message); }
+      finally {
+        reading = false;
+        if (!controller.signal.aborted) { setLoading(false); timer = setTimeout(read, 10000); }
+      }
+    }
+    read();
+    globalThis.window?.addEventListener("focus", read);
+    return () => { controller.abort(); clearTimeout(timer); globalThis.window?.removeEventListener("focus", read); };
   }, [mallId, initialMall, initialData, revision, window]);
   const slots = data?.slots || [];
   const floors = data?.supportedFloors || [];
@@ -133,6 +146,7 @@ export default function ParkingAvailabilityPage({ initialMall = null, initialDat
     <PageHeader title="Your spot. Your way." description={mall ? `${mall.name} · ${mall.address || mall.city || ""}` : "Explore parking bays and floor availability."} />
     {(mall || mallId) && <BookingWindowForm activeWindow={window} loading={loading} busy={bookingBusy}
       onCheck={checkWindow} onClear={() => checkWindow(null)} />}
+    <p className="panel-hint" role="status">{window ? "Availability for the selected time window." : "Reservation overview: reserved bays include current and upcoming bookings. Select a time window to see availability for your visit."} Updates every 10 seconds.</p>
     {booking && <section className="reservation-confirmation" aria-label="Reservation confirmed">
       <h2>Reservation confirmed</h2>
       <p>{booking.slotCode} · {booking.floor} · {formatBookingTime(booking.startTime)} to {formatBookingTime(booking.endTime)} IST</p>

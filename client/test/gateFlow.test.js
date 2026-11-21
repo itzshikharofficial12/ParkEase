@@ -11,6 +11,8 @@ import GateConsolePage from "../src/pages/GateConsolePage.jsx";
 import BookingPass from "../src/components/BookingPass.jsx";
 import GuardsPage from "../src/pages/GuardsPage.jsx";
 import Modal from "../src/components/Modal.jsx";
+import ParkingAvailabilityPage from "../src/pages/ParkingAvailabilityPage.jsx";
+import AnalyticsPage from "../src/pages/AnalyticsPage.jsx";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { cleanup(); globalThis.fetch = originalFetch; });
@@ -187,4 +189,54 @@ test("Missing camera support leaves the guard's manual credential workflow avail
   assert.equal(view.getByLabelText(/Driver's manual credential/).disabled, false);
   fireEvent.click(view.getByRole("button", { name: "Close camera", exact: true }));
   assert.ok(!view.queryByLabelText("QR camera preview"));
+});
+
+test("A successful reservation immediately refreshes the selected bay to RESERVED", async () => {
+  let reserved = false;
+  const lookups = [];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const user = await session("USER", (path, options) => {
+    if (path === "/malls/mall-1/slots") {
+      lookups.push(true);
+      return reply({ slots: [{ id: "bay-1", slotNumber: "A01", floor: "B1", vehicleType: "CAR", hourlyRate: 25, status: reserved ? "RESERVED" : "AVAILABLE" }] });
+    }
+    if (path === "/bookings") {
+      const body = JSON.parse(options.body);
+      assert.equal(body.bayId, "bay-1");
+      reserved = true;
+      return reply({ booking: { ...booking, startTime: body.startTime, endTime: body.endTime } }, 201);
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const view = mount(ParkingAvailabilityPage, user, { initialMall: { id: "mall-1", name: "Test Mall" } });
+  await view.findByRole("button", { name: /Slot A01/ });
+  fireEvent.change(view.getByLabelText(/Arrival date/), { target: { value: tomorrow } });
+  const time = view.getByLabelText(/Arrival time/);
+  fireEvent.change(time, { target: { value: "12:00" } });
+  fireEvent.submit(time.closest("form"));
+  fireEvent.click(await view.findByRole("button", { name: /Slot A01/ }));
+  const plate = view.getByLabelText(/Vehicle plate number/);
+  fireEvent.change(plate, { target: { value: "DL01AB1234" } });
+  fireEvent.submit(plate.closest("form"));
+  await view.findByRole("heading", { name: "Reservation confirmed" });
+  const heldBay = await view.findByRole("button", { name: /Slot A01.*RESERVED/ });
+  fireEvent.click(heldBay);
+  assert.ok(!view.queryByRole("button", { name: "Confirm reservation" }));
+  assert.match(view.container.textContent, /unavailable for the selected window/);
+  assert.ok(lookups.length >= 3, "Availability is checked again after confirmation");
+});
+
+for (const role of ["MALL_OWNER", "ADMIN"]) test(`${role} analytics refreshes future-reservation bay counts when the tab regains focus`, async () => {
+  let held = false;
+  const user = await session(role, (path) => {
+    assert.equal(path, role === "ADMIN" ? "/analytics/admin/overview" : "/analytics/owner/overview");
+    return reply({ metrics: { totalBays: 2, availableNow: 2, occupiedNow: 0, reservedNow: 0, maintenanceNow: 0, unreservedBays: held ? 1 : 2, reservedBays: held ? 1 : 0, upcomingBookings: held ? 1 : 0, activeVisits: 0, completedVisits: 0, expiredBookings: 0, cancelledBookings: 0, billedAmountPaise: 0 }, series: [], perMall: [], generatedAt: new Date().toISOString() });
+  });
+  const view = mount(AnalyticsPage, user);
+  const card = (await view.findByText("Unreserved bays")).closest("article");
+  assert.equal(card.querySelector(".stat-card-value").textContent, "2");
+  held = true;
+  fireEvent.focus(dom.window);
+  await waitFor(() => assert.equal(card.querySelector(".stat-card-value").textContent, "1"));
+  assert.match(view.getByRole("region", { name: "Parking reservation overview" }).textContent, /Reserved \(incl\. upcoming\)1/);
 });
